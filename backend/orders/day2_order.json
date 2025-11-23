@@ -1,0 +1,21 @@
+{
+  "drinkType": "cappuccino",
+  "size": "Large",
+  "milk": "Almond milk",
+  "extras": [
+    "ice",
+    "ice",
+    "ice",
+    "chocolate syrup",
+    "ice",
+    "chocolate syrup",
+    "whipped cream",
+    "whipped cream",
+    "chocolate syrup",
+    "chocolate syrup",
+    "chocolate syrup",
+    "chocolate syrup",
+    "chocolate syrup"
+  ],
+  "name": "Coco"
+}

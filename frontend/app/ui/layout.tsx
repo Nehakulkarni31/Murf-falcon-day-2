@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { headers } from 'next/headers';
-import { SessionProvider } from '@/components/app/session-provider';
+import { SessionProvider } from '@/components/session-provider';
 import { getAppConfig } from '@/lib/utils';
 
 export default async function ComponentsLayout({ children }: { children: React.ReactNode }) {

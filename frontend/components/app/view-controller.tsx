@@ -3,8 +3,8 @@
 import { useRef } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useRoomContext } from '@livekit/components-react';
-import { useSession } from '@/components/app/session-provider';
-import { SessionView } from '@/components/app/session-view';
+import { useSession } from '@/components/session-provider';
+import { SessionView } from '@/components/session-view';
 import { WelcomeView } from '@/components/app/welcome-view';
 
 const MotionWelcomeView = motion.create(WelcomeView);
@@ -23,9 +23,10 @@ const VIEW_MOTION_PROPS = {
   animate: 'visible',
   exit: 'hidden',
   transition: {
-    duration: 0.5,
-    ease: 'linear',
-  },
+  duration: 0.5,
+  easing: 'linear'
+}
+,
 };
 
 export function ViewController() {

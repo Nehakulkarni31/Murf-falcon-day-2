@@ -4,7 +4,7 @@ import { type HTMLAttributes, useCallback, useState } from 'react';
 import { Track } from 'livekit-client';
 import { useChat, useRemoteParticipants } from '@livekit/components-react';
 import { ChatTextIcon, PhoneDisconnectIcon } from '@phosphor-icons/react/dist/ssr';
-import { useSession } from '@/components/app/session-provider';
+import { useSession } from '@/components/session-provider';
 import { TrackToggle } from '@/components/livekit/agent-control-bar/track-toggle';
 import { Button } from '@/components/livekit/button';
 import { Toggle } from '@/components/livekit/toggle';

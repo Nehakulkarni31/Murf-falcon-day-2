@@ -14,7 +14,9 @@ import { useChatMessages } from '@/hooks/useChatMessages';
 import { useConnectionTimeout } from '@/hooks/useConnectionTimout';
 import { useDebugMode } from '@/hooks/useDebug';
 import { cn } from '@/lib/utils';
-import { ScrollArea } from '../livekit/scroll-area/scroll-area';
+import { ScrollArea } from './livekit/scroll-area/scroll-area';
+import { useRoomContext } from '@livekit/components-react';
+import Receipt from '@/components/Receipt';
 
 const MotionBottom = motion.create('div');
 
@@ -34,30 +36,12 @@ const BOTTOM_VIEW_MOTION_PROPS = {
   animate: 'visible',
   exit: 'hidden',
   transition: {
-    duration: 0.3,
-    delay: 0.5,
-    ease: 'easeOut',
-  },
+  duration: 0.5,
+  easing: 'linear'
+}
+,
 };
 
-interface FadeProps {
-  top?: boolean;
-  bottom?: boolean;
-  className?: string;
-}
-
-export function Fade({ top = false, bottom = false, className }: FadeProps) {
-  return (
-    <div
-      className={cn(
-        'from-background pointer-events-none h-4 bg-linear-to-b to-transparent',
-        top && 'bg-linear-to-b',
-        bottom && 'bg-linear-to-t',
-        className
-      )}
-    />
-  );
-}
 interface SessionViewProps {
   appConfig: AppConfig;
 }
@@ -69,9 +53,41 @@ export const SessionView = ({
   useConnectionTimeout(200_000);
   useDebugMode({ enabled: IN_DEVELOPMENT });
 
+  const room = useRoomContext();
   const messages = useChatMessages();
   const [chatOpen, setChatOpen] = useState(false);
+  const [order, setOrder] = useState(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
+
+  // -------------------------------
+  // LISTEN FOR BACKEND ORDER EVENT
+  // -------------------------------
+  useEffect(() => {
+  if (!room) return;
+
+  const listener = (payload) => {
+    console.log("🔥 RAW DATA RECEIVED:", payload);
+
+    try {
+      const dataString = new TextDecoder().decode(payload.data);
+      const msg = JSON.parse(dataString);
+
+      const isOrderEvent =
+        payload.topic === "order_complete" ||
+        msg.type === "order_complete";
+
+      if (!isOrderEvent) return;
+
+      console.log("📦 Parsed order:", msg.order);
+      setOrder(msg.order);
+    } catch (err) {
+      console.error("❌ Failed to parse order message", err);
+    }
+  };
+
+  room.on("dataReceived", listener);
+  return () => room.off("dataReceived", listener);
+}, [room]);
 
   const controls: ControlBarControls = {
     leave: true,
@@ -92,6 +108,12 @@ export const SessionView = ({
 
   return (
     <section className="bg-background relative z-10 h-full w-full overflow-hidden" {...props}>
+
+      {/* Receipt UI */}
+      <div className="flex justify-center mt-4">
+        <Receipt order={order} />
+      </div>
+
       {/* Chat Transcript */}
       <div
         className={cn(
@@ -99,7 +121,6 @@ export const SessionView = ({
           !chatOpen && 'pointer-events-none'
         )}
       >
-        <Fade top className="absolute inset-x-4 top-0 h-40" />
         <ScrollArea ref={scrollAreaRef} className="px-4 pt-40 pb-[150px] md:px-6 md:pb-[180px]">
           <ChatTranscript
             hidden={!chatOpen}
@@ -112,7 +133,7 @@ export const SessionView = ({
       {/* Tile Layout */}
       <TileLayout chatOpen={chatOpen} />
 
-      {/* Bottom */}
+      {/* Bottom Control Bar */}
       <MotionBottom
         {...BOTTOM_VIEW_MOTION_PROPS}
         className="fixed inset-x-3 bottom-0 z-50 md:inset-x-12"
@@ -121,10 +142,10 @@ export const SessionView = ({
           <PreConnectMessage messages={messages} className="pb-4" />
         )}
         <div className="bg-background relative mx-auto max-w-2xl pb-3 md:pb-12">
-          <Fade bottom className="absolute inset-x-0 top-0 h-4 -translate-y-full" />
           <AgentControlBar controls={controls} onChatOpenChange={setChatOpen} />
         </div>
       </MotionBottom>
+
     </section>
   );
 };
