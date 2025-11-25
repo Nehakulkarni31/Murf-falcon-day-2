@@ -1,6 +1,7 @@
 import logging
 import os
 import json
+from datetime import datetime
 
 from dotenv import load_dotenv
 from livekit.agents import (
@@ -24,150 +25,146 @@ logger = logging.getLogger("agent")
 
 load_dotenv(".env.local")
 
-ORDER_STATE = {
-    "drinkType": None,
-    "size": None,
-    "milk": None,
-    "extras": [],
-    "name": None,
-}
-
-def order_complete(order):
-    return (
-        order["drinkType"] is not None
-        and order["size"] is not None
-        and order["milk"] is not None
-        and order["name"] is not None
-    )
-
-def save_order(order):
-    os.makedirs("orders", exist_ok=True)
-    with open("orders/day2_order.json", "w") as f:
-        json.dump(order, f, indent=2)
-    print("ORDER SAVED:", order)
+WELLNESS_LOG = r"backend\wellness_log.json"
 
 
 # -------------------------
-#   BARISTA AGENT
+# JSON LOADING & SAVING
 # -------------------------
+
+def load_previous_entries():
+    if not os.path.exists(WELLNESS_LOG):
+        return []
+    with open(WELLNESS_LOG, "r") as f:
+        return json.load(f)
+
+
+def save_entry(entry):
+    data = load_previous_entries()
+    data.append(entry)
+    with open(WELLNESS_LOG, "w") as f:
+        json.dump(data, f, indent=2)
+
+
+# -------------------------
+# WELLNESS AGENT
+# -------------------------
+
 class Assistant(Agent):
-    def __init__(self) -> None:
+    def __init__(self):
+        past_entries = load_previous_entries()
+        last_note = ""
+
+        if past_entries:
+            last = past_entries[-1]
+            last_note = f"""
+Last time you talked to the user, they felt '{last['mood']}' and their energy was '{last['energy']}'.
+Their goals were: {', '.join(last['goals'])}.
+"""
+
         super().__init__(
-            instructions="""
-You are Murf, a cheerful and friendly barista at MoonBrew Coffee. First introduce yourself. Your job is to take complete coffee orders from customers. Ask questions conversationally and fill the order one step at a time.
-You MUST use the tools:
-- update_order
-- finish_order
+            instructions=f"""
+You are a supportive, grounded daily wellness companion, Murf. 
+First introduce yourself warmly and say you're here for their daily check-in.
+Avoid medical advice or diagnoses.
 
-RULES YOU MUST FOLLOW:
-1. Every time the user gives ANY detail (drink, size, milk, extras, or name), CALL update_order().
-2. NEVER store information in your own memory. ONLY store information via update_order().
-3. Ask ONE question at a time.
-4. When ALL fields are filled, IMMEDIATELY call finish_order().
-5. After finish_order(), thank the customer.
-6. Keep responses short and friendly.
+{last_note}
 
-The order fields are:
-- drinkType
-- size
-- milk
-- extras
-- name
+Your job each day:
+1. Ask about mood and energy.
+2. Ask about 1–3 simple goals.
+3. Give small, grounded, NON-medical suggestions.
+4. Summarize the check-in.
+5. Call save_checkin at the end.
 
-AVAILABLE EXTRAS:
-- whipped cream
-- caramel
-- chocolate syrup
-- hazelnut syrup
-- vanilla syrup
-- ice
-
+Rules:
+- Keep responses warm, calm, and short.
+- Ask ONE question at a time.
+- Use update_checkin to store the details.
 """
         )
 
-    # ----------- TOOL: UPDATE ORDER -----------
-    @function_tool
-    async def update_order(
-        self,
-        context: RunContext,
-        drinkType: str = None,
-        size: str = None,
-        milk: str = None,
-        extras: list = None,
-        name: str = None
-    ):
-        global ORDER_STATE
+    # -------------------------
+    # TOOL: UPDATE CHECK-IN
+    # -------------------------
+    # -------- TOOL: UPDATE CHECK-IN --------
+@function_tool
+async def update_checkin(
+    self,
+    context: RunContext,
+    mood: str = None,
+    energy: str = None,
+    goals: list = None
+):
+    """Store today's check-in data."""
+    ctx = context.session.userdata
 
-        if drinkType:
-            ORDER_STATE["drinkType"] = drinkType
+    if "checkin" not in ctx:
+        ctx["checkin"] = {"mood": None, "energy": None, "goals": []}
 
-        if size:
-            ORDER_STATE["size"] = size
+    if mood:
+        ctx["checkin"]["mood"] = mood
 
-        if milk:
-            ORDER_STATE["milk"] = milk
+    if energy:
+        ctx["checkin"]["energy"] = energy
 
-        if extras:
-            ORDER_STATE["extras"].extend(extras)
+    if goals:
+        ctx["checkin"]["goals"].extend(goals)
 
-        if name:
-            ORDER_STATE["name"] = name
+    return ctx["checkin"]
 
-        print("UPDATED ORDER:", ORDER_STATE)
-        return ORDER_STATE
 
-    # ----------- TOOL: FINISH ORDER -----------
-    @function_tool
-    async def finish_order(self, context: RunContext):
-        global ORDER_STATE
+# -------- TOOL: SAVE CHECK-IN --------
+@function_tool
+async def save_checkin(self, context: RunContext):
+    """Save today's check-in and send it to the frontend."""
+    ctx = context.session.userdata
 
-        if order_complete(ORDER_STATE):
-            save_order(ORDER_STATE)
+    if "checkin" not in ctx:
+        return {"error": "Check-in incomplete"}
 
-            # Send data to frontend using LiveKit data channel
-            payload = {
-                "type": "order_complete",
-                "order": ORDER_STATE
-            }
+    entry = {
+        "timestamp": datetime.now().isoformat(),
+        "mood": ctx["checkin"].get("mood"),
+        "energy": ctx["checkin"].get("energy"),
+        "goals": ctx["checkin"].get("goals"),
+        "summary": (
+            f"You felt {ctx['checkin'].get('mood')} with "
+            f"{ctx['checkin'].get('energy')} energy and planned goals: "
+            f"{ctx['checkin'].get('goals')}"
+        ),
+    }
 
-            await context.session.send_data(
-                json.dumps(payload).encode("utf-8"),
-                topic="order_complete",
-                reliable=True
-            )
+    save_entry(entry)
 
-            final = ORDER_STATE.copy()
+    await context.session.send_data(
+        json.dumps({
+            "type": "wellness_update",
+            "data": entry
+        }).encode("utf-8"),
+        topic="wellness_update",
+        reliable=True
+    )
 
-            # Reset for next customer
-            ORDER_STATE = {
-                "drinkType": None,
-                "size": None,
-                "milk": None,
-                "extras": [],
-                "name": None,
-            }
-
-            return final
-
-        return {"error": "Order is not complete yet."}
+    return entry
 
 
 
 # -------------------------
-#   PREWARM MODELS
+# PREWARM MODELS
 # -------------------------
+
 def prewarm(proc: JobProcess):
     proc.userdata["vad"] = silero.VAD.load()
 
 
 # -------------------------
-#   ENTRYPOINT
+# ENTRYPOINT
 # -------------------------
+
 async def entrypoint(ctx: JobContext):
 
-    ctx.log_context_fields = {
-        "room": ctx.room.name,
-    }
+    ctx.log_context_fields = {"room": ctx.room.name}
 
     session = AgentSession(
         stt=deepgram.STT(model="nova-3"),
@@ -178,29 +175,22 @@ async def entrypoint(ctx: JobContext):
             tokenizer=tokenize.basic.SentenceTokenizer(min_sentence_len=2),
             text_pacing=True,
         ),
-        turn_detection=MultilingualModel(),
         vad=ctx.proc.userdata["vad"],
+        turn_detection=MultilingualModel(),
         preemptive_generation=True,
     )
 
     usage_collector = metrics.UsageCollector()
 
     @session.on("metrics_collected")
-    def _on_metrics_collected(ev: MetricsCollectedEvent):
-        metrics.log_metrics(ev.metrics)
+    def _on(ev: MetricsCollectedEvent):
         usage_collector.collect(ev.metrics)
-
-    async def log_usage():
-        summary = usage_collector.get_summary()
-        logger.info(f"Usage: {summary}")
-
-    ctx.add_shutdown_callback(log_usage)
 
     await session.start(
         agent=Assistant(),
         room=ctx.room,
         room_input_options=RoomInputOptions(
-            noise_cancellation=noise_cancellation.BVC(),
+            noise_cancellation=noise_cancellation.BVC()
         ),
     )
 
@@ -208,4 +198,9 @@ async def entrypoint(ctx: JobContext):
 
 
 if __name__ == "__main__":
-    cli.run_app(WorkerOptions(entrypoint_fnc=entrypoint, prewarm_fnc=prewarm))
+    cli.run_app(
+        WorkerOptions(
+            entrypoint_fnc=entrypoint,
+            prewarm_fnc=prewarm
+        )
+    )

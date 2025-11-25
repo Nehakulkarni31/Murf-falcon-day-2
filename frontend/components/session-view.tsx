@@ -14,33 +14,11 @@ import { useChatMessages } from '@/hooks/useChatMessages';
 import { useConnectionTimeout } from '@/hooks/useConnectionTimout';
 import { useDebugMode } from '@/hooks/useDebug';
 import { cn } from '@/lib/utils';
-import { ScrollArea } from './livekit/scroll-area/scroll-area';
+
 import { useRoomContext } from '@livekit/components-react';
-import Receipt from '@/components/Receipt';
+import WellnessSummary from '@/components/WellnessSummary';
 
 const MotionBottom = motion.create('div');
-
-const IN_DEVELOPMENT = process.env.NODE_ENV !== 'production';
-const BOTTOM_VIEW_MOTION_PROPS = {
-  variants: {
-    visible: {
-      opacity: 1,
-      translateY: '0%',
-    },
-    hidden: {
-      opacity: 0,
-      translateY: '100%',
-    },
-  },
-  initial: 'hidden',
-  animate: 'visible',
-  exit: 'hidden',
-  transition: {
-  duration: 0.5,
-  easing: 'linear'
-}
-,
-};
 
 interface SessionViewProps {
   appConfig: AppConfig;
@@ -50,98 +28,102 @@ export const SessionView = ({
   appConfig,
   ...props
 }: React.ComponentProps<'section'> & SessionViewProps) => {
-  useConnectionTimeout(200_000);
-  useDebugMode({ enabled: IN_DEVELOPMENT });
 
   const room = useRoomContext();
   const messages = useChatMessages();
   const [chatOpen, setChatOpen] = useState(false);
-  const [order, setOrder] = useState(null);
-  const scrollAreaRef = useRef<HTMLDivElement>(null);
+  const [wellness, setWellness] = useState(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
-  // -------------------------------
-  // LISTEN FOR BACKEND ORDER EVENT
-  // -------------------------------
+  // -------------------------
+  // LISTEN TO BACKEND EVENTS
+  // -------------------------
   useEffect(() => {
-  if (!room) return;
+    if (!room) return;
 
-  const listener = (payload) => {
-    console.log("🔥 RAW DATA RECEIVED:", payload);
+    const listener = (payload: any) => {
+      try {
+        const decoded = new TextDecoder().decode(payload.data);
+        const msg = JSON.parse(decoded);
 
-    try {
-      const dataString = new TextDecoder().decode(payload.data);
-      const msg = JSON.parse(dataString);
+        if (msg.type !== 'wellness_update') return;
 
-      const isOrderEvent =
-        payload.topic === "order_complete" ||
-        msg.type === "order_complete";
+        console.log("WELLNESS:", msg.data);
+        setWellness(msg.data);
 
-      if (!isOrderEvent) return;
+      } catch (err) {
+        console.error(err);
+      }
+    };
 
-      console.log("📦 Parsed order:", msg.order);
-      setOrder(msg.order);
-    } catch (err) {
-      console.error("❌ Failed to parse order message", err);
-    }
-  };
+    room.on('dataReceived', listener);
+    return () => { room.off('dataReceived', listener); };
+  }, [room]);
 
-  room.on("dataReceived", listener);
-  return () => room.off("dataReceived", listener);
-}, [room]);
-
+  // Controls at bottom
   const controls: ControlBarControls = {
     leave: true,
     microphone: true,
     chat: appConfig.supportsChatInput,
-    camera: appConfig.supportsVideoInput,
-    screenShare: appConfig.supportsVideoInput,
+    camera: false,
+    screenShare: false,
   };
 
-  useEffect(() => {
-    const lastMessage = messages.at(-1);
-    const lastMessageIsLocal = lastMessage?.from?.isLocal === true;
-
-    if (scrollAreaRef.current && lastMessageIsLocal) {
-      scrollAreaRef.current.scrollTop = scrollAreaRef.current.scrollHeight;
-    }
-  }, [messages]);
+  // AI Listening Indicator
+  const isListening = (room as any)?.connectionState === "connected";
 
   return (
-    <section className="bg-background relative z-10 h-full w-full overflow-hidden" {...props}>
+    <section
+      className="relative h-full w-full overflow-hidden bg-gradient-to-b from-[#0f1115] to-[#0b0d11] text-white"
+      {...props}
+    >
 
-      {/* Receipt UI */}
-      <div className="flex justify-center mt-4">
-        <Receipt order={order} />
+      {/* AI LISTENING INDICATOR */}
+      <div className="w-full flex justify-center mt-4 mb-2">
+        <div className="flex items-center gap-2">
+          <span
+            className={`h-3 w-3 rounded-full transition-all ${
+              isListening ? "bg-green-400 animate-pulse" : "bg-gray-500"
+            }`}
+          ></span>
+          <span className="text-sm text-gray-300">
+            {isListening ? "AI is listening…" : "Connecting…"}
+          </span>
+        </div>
       </div>
 
-      {/* Chat Transcript */}
+      {/* WELLNESS CARD UI */}
+      <div className="flex justify-center mt-4">
+        <WellnessSummary entry={wellness} />
+      </div>
+
+      {/* CHAT TRANSCRIPT */}
       <div
         className={cn(
-          'fixed inset-0 grid grid-cols-1 grid-rows-1',
-          !chatOpen && 'pointer-events-none'
+          "fixed inset-0 grid grid-cols-1 grid-rows-1 transition-opacity",
+          !chatOpen && "pointer-events-none opacity-0"
         )}
       >
-        <ScrollArea ref={scrollAreaRef} className="px-4 pt-40 pb-[150px] md:px-6 md:pb-[180px]">
-          <ChatTranscript
-            hidden={!chatOpen}
-            messages={messages}
-            className="mx-auto max-w-2xl space-y-3 transition-opacity duration-300 ease-out"
-          />
-        </ScrollArea>
+        <div
+          ref={scrollRef}
+          className="px-4 pt-40 pb-[150px] overflow-y-auto"
+        >
+          <ChatTranscript hidden={!chatOpen} messages={messages} />
+        </div>
       </div>
 
-      {/* Tile Layout */}
+      {/* TILE LAYOUT */}
       <TileLayout chatOpen={chatOpen} />
 
-      {/* Bottom Control Bar */}
+      {/* Bottom bar */}
       <MotionBottom
-        {...BOTTOM_VIEW_MOTION_PROPS}
-        className="fixed inset-x-3 bottom-0 z-50 md:inset-x-12"
+        initial={{ opacity: 0, translateY: "100%" }}
+        animate={{ opacity: 1, translateY: "0%" }}
+        exit={{ opacity: 0, translateY: "100%" }}
+        transition={{ duration: 0.4 }}
+        className="fixed inset-x-3 bottom-0 z-50"
       >
-        {appConfig.isPreConnectBufferEnabled && (
-          <PreConnectMessage messages={messages} className="pb-4" />
-        )}
-        <div className="bg-background relative mx-auto max-w-2xl pb-3 md:pb-12">
+        <div className="bg-[#0d0f13]/70 backdrop-blur-xl rounded-xl pb-4 mx-auto max-w-2xl">
           <AgentControlBar controls={controls} onChatOpenChange={setChatOpen} />
         </div>
       </MotionBottom>
